@@ -22,3 +22,4 @@ devtunnel host -p 3000 --allow-anonymous
 5. Enjoy ungatekept music, files will be deduped.
 
 *Syncing happens in the background. Check your terminal for progress bars and logs.*
+If you want to make your link public, open an issue with [SHARE] in the subject. <3
