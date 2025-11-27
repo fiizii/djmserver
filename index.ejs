@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>djmserver</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <script type="importmap">
+        { "imports": { "web-audio-beat-detector": "https://esm.sh/web-audio-beat-detector@8.1.0" } }
+    </script>
+
+    <style>
+        :root {
+            --c-void: #030507;
+            --c-panel: #0a0f14;
+            --c-panel-border: #1c252e;
+            --c-ice-100: #00f0ff;
+            --c-ice-50: rgba(0, 240, 255, 0.5);
+            --c-ice-10: rgba(0, 240, 255, 0.1);
+            --c-text-main: #e0f4f5;
+            --c-text-muted: #5d7685;
+            --c-alert: #ff3366;
+            --h-header: 60px;
+            --h-footer: 50px;
+            --radius: 6px;
+            --glow: 0 0 15px var(--c-ice-10);
+            --border-glass: 1px solid rgba(255, 255, 255, 0.08);
+            --font-ui: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            background-color: var(--c-void);
+            background-image:
+                radial-gradient(circle at 50% 0%, #0d1821 0%, var(--c-void) 60%),
+                url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+            font-family: var(--font-ui);
+            color: var(--c-text-main);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .cryo-a {
+            width: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            background: rgba(10, 15, 20, 0.6);
+            backdrop-filter: blur(12px);
+        }
+
+        @media (min-width: 1024px) {
+            .cryo-a {
+                width: 95vw;
+                height: 92vh;
+                border: var(--border-glass);
+                border-radius: var(--radius);
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+            }
+        }
+
+        .deck-panel {
+            padding: 20px;
+            border-bottom: var(--border-glass);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 100%);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .deck-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .track-title {
+            font-family: var(--font-mono);
+            font-size: 14px;
+            letter-spacing: 1px;
+            color: var(--c-ice-100);
+            text-shadow: 0 0 8px var(--c-ice-50);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .track-stats {
+            display: flex;
+            gap: 12px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--c-text-muted);
+        }
+
+        .stat-value {
+            color: #fff;
+            margin-left: 4px;
+        }
+
+        .viz-hold {
+            position: relative;
+            height: 128px;
+            background: #05080a;
+            border: 1px solid #1c252e;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        #waveform,
+        #grid-layer,
+        #spectrum-layer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #spectrum-layer {
+            z-index: 0;
+            opacity: 0.3;
+            mix-blend-mode: screen;
+        }
+
+        #waveform {
+            z-index: 1;
+        }
+
+        #grid-layer {
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .controls-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .btn-dl {
+            background: rgba(255, 255, 255, 0.03);
+            border: var(--border-glass);
+            color: var(--c-text-main);
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-dl:hover {
+            background: var(--c-ice-10);
+            border-color: var(--c-ice-50);
+            color: var(--c-ice-100);
+        }
+
+        .btn-dl.active {
+            background: var(--c-ice-100);
+            color: #000;
+            box-shadow: var(--glow);
+            border-color: var(--c-ice-100);
+        }
+
+        .zoom-slider {
+            flex: 1;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.1);
+            height: 2px;
+            border-radius: 2px;
+        }
+
+        .zoom-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 10px;
+            height: 10px;
+            background: var(--c-ice-100);
+            border-radius: 50%;
+            cursor: ew-resize;
+            box-shadow: 0 0 8px var(--c-ice-100);
+        }
+
+        .vault-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+            position: relative;
+        }
+
+        .vault-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .vault-panel::-webkit-scrollbar-track {
+            background: #05080a;
+        }
+
+        .vault-panel::-webkit-scrollbar-thumb {
+            background: #1c252e;
+            border-radius: 3px;
+        }
+
+        .vault-panel::-webkit-scrollbar-thumb:hover {
+            background: var(--c-text-muted);
+        }
+
+        .file-tree {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            font-family: var(--font-ui);
+            font-size: 13px;
+        }
+
+        .node {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            user-select: none;
+        }
+
+        .node-content {
+            display: flex;
+            align-items: center;
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: background 0.15s;
+            color: var(--c-text-muted);
+        }
+
+        .node-content:hover {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--c-text-main);
+        }
+
+        .node-content.is-active {
+            background: linear-gradient(90deg, var(--c-ice-10) 0%, transparent 100%);
+            color: var(--c-ice-100);
+            border-left: 2px solid var(--c-ice-100);
+        }
+
+        .node-icon {
+            width: 20px;
+            text-align: center;
+            margin-right: 8px;
+        }
+
+        .node-check {
+            margin-right: 12px;
+            accent-color: var(--c-ice-100);
+            cursor: pointer;
+        }
+
+        .sub-tree {
+            display: none;
+            background: rgba(0, 0, 0, 0.15);
+        }
+
+        .sub-tree.open {
+            display: block;
+        }
+
+        .meta-tag {
+            font-size: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2px 6px;
+            border-radius: 2px;
+            margin-left: auto;
+            color: #666;
+        }
+
+        .footer-panel {
+            height: var(--h-footer);
+            border-top: var(--border-glass);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            background: #05080a;
+        }
+
+        .btn-action {
+            background: transparent;
+            border: 1px solid var(--c-ice-100);
+            color: var(--c-ice-100);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 8px 24px;
+            border-radius: 2px;
+            cursor: pointer;
+            transition: 0.2s;
+            letter-spacing: 1px;
+        }
+
+        .btn-action:hover:not(:disabled) {
+            background: var(--c-ice-100);
+            color: #000;
+            box-shadow: var(--glow);
+        }
+
+        .btn-action:disabled {
+            border-color: #333;
+            color: #444;
+            cursor: not-allowed;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .blink {
+            animation: blink 2s infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <% function buildHierarchy(flatList) { const root=[]; flatList.sort((a,b)=> a.path.localeCompare(b.path));
+
+        flatList.forEach(item => {
+        const parts = item.path.replace(/\\/g, '/').split('/');
+        let currentLevel = root;
+
+        parts.forEach((part, index) => {
+        const isFile = index === parts.length - 1;
+        let existing = currentLevel.find(n => n.name === part && n.type === (isFile ? 'file' : 'directory'));
+        if (!existing) {
+        const newNode = {
+        name: part,
+        path: isFile ? item.path : null, // Store full path for files
+        type: isFile ? 'file' : 'directory',
+        meta: isFile ? item : null, // Attach full DB metadata
+        children: []
+        };
+        currentLevel.push(newNode);
+        existing = newNode;
+        }
+        if (!isFile) {
+        currentLevel = existing.children;
+        }
+        });
+        });
+        return root;
+        }
+        const hierarchy = buildHierarchy(tree);
+        %>
+
+        <div class="cryo-a">
+            <section class="deck-panel">
+                <div class="deck-info">
+                    <div>
+                        <div class="track-title" id="meta-title">NO TRACK</div>
+                        <div class="track-stats">
+                            <span>BPM <span id="meta-bpm" class="stat-value">--</span></span>
+                            <span>TIME <span id="meta-time" class="stat-value">00:00</span></span>
+                            <span>KBPS <span id="meta-bitrate" class="stat-value">--</span></span>
+                        </div>
+                    </div>
+                    <i class="fas fa-compact-disc fa-spin" id="spinner"
+                        style="color:var(--c-ice-100); opacity:0; transition:opacity 0.5s"></i>
+                </div>
+
+                <div class="viz-hold">
+                    <canvas id="spectrum-layer"></canvas>
+                    <div id="waveform"></div>
+                    <canvas id="grid-layer"></canvas>
+                </div>
+
+                <div class="controls-row">
+                    <button class="btn-dl" id="btn-play"><i class="fas fa-play"></i></button>
+                    <button class="btn-dl" id="btn-stop"><i class="fas fa-stop"></i></button>
+                    <div style="width:1px; height:20px; background:rgba(255,255,255,0.1); margin:0 8px;"></div>
+                    <i class="fas fa-search-minus" style="font-size:10px; color:var(--c-text-muted)"></i>
+                    <input type="range" class="zoom-slider" id="zoom-slider" min="20" max="500" value="100">
+                    <i class="fas fa-search-plus" style="font-size:10px; color:var(--c-text-muted)"></i>
+                </div>
+            </section>
+
+            <section class="vault-panel">
+                <ul class="file-tree" id="file-root">
+                    <% function renderTree(nodes) { nodes.sort((a,b)=> {
+                        if (a.type === b.type) return a.name.localeCompare(b.name);
+                        return a.type === 'directory' ? -1 : 1;
+                        });
+
+                        nodes.forEach(n => { %>
+                        <li class="node">
+                            <% if (n.type==='directory' ) { %>
+                                <div class="node-content type-dir" data-path="<%= n.name %>">
+                                    <i class="fas fa-caret-right node-icon" style="transition: transform 0.2s"></i>
+                                    <input type="checkbox" class="node-check group-check">
+                                    <span>
+                                        <%= n.name %>
+                                    </span>
+                                </div>
+                                <ul class="sub-tree">
+                                    <%= renderTree(n.children) %>
+                                </ul>
+                                <% } else { %>
+                                    <div class="node-content type-file" data-path="<%= n.path.replace(/\\/g, '/') %>"
+                                        data-name="<%= n.meta.title || n.name %>"
+                                        data-bitrate="<%= n.meta.bitrate ? Math.round(n.meta.bitrate / 1000) : 0 %>">
+                                        <span class="node-icon"></span>
+                                        <input type="checkbox" class="node-check file-check"
+                                            value="<%= n.path.replace(/\\/g, '/') %>">
+                                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                            <%= n.meta.artist ? n.meta.artist + ' - ' : '' %>
+                                                <%= n.meta.title || n.name %>
+                                        </span>
+                                        <% if(n.meta.bitrate) { %>
+                                            <span class="meta-tag">
+                                                <%= Math.round(n.meta.bitrate / 1000) %>k
+                                            </span>
+                                            <% } %>
+                                    </div>
+                                    <% } %>
+                        </li>
+                        <% }); %>
+                            <% } %>
+
+                                <%= renderTree(hierarchy) %>
+                </ul>
+            </section>
+
+            <footer class="footer-panel">
+                <span style="font-family:var(--font-mono); font-size:11px; color:var(--c-text-muted);">
+                    <span id="select-count" style="color:var(--c-ice-100)">0</span> ASSETS SELECTED
+                    <span id="select-warn"></span>
+                </span>
+                <button id="btn-extract" class="btn-action" disabled>
+                    EXTRACT <i class="fas fa-download" style="margin-left:6px"></i>
+                </button>
+            </footer>
+        </div>
+
+        <script type="module">
+            import { guess } from 'web-audio-beat-detector';
+
+            const State = {
+                bpm: 0,
+                beats: [],
+                isPlaying: false,
+                currentFile: null,
+                selectedFiles: new Set()
+            };
+
+            const AudioEngine = (() => {
+                let wavesurfer, context, analyser;
+
+                const init = () => {
+                    wavesurfer = WaveSurfer.create({
+                        container: '#waveform',
+                        waveColor: '#1c252e',
+                        progressColor: '#00f0ff',
+                        cursorColor: '#fff',
+                        barWidth: 2,
+                        barGap: 2,
+                        barRadius: 2,
+                        height: 'auto',
+                        normalize: true,
+                        interact: true,
+                    });
+
+                    wavesurfer.on('ready', onReady);
+                    wavesurfer.on('play', () => updateUI(true));
+                    wavesurfer.on('pause', () => updateUI(false));
+                    wavesurfer.on('finish', () => updateUI(false));
+                    wavesurfer.on('audioprocess', onTick);
+
+                    wavesurfer.on('ready', () => {
+                        if (!context) {
+                            context = new (window.AudioContext || window.webkitAudioContext)();
+                            const media = wavesurfer.getMediaElement();
+                            const source = context.createMediaElementSource(media);
+                            analyser = context.createAnalyser();
+                            analyser.fftSize = 512;
+                            source.connect(analyser);
+                            analyser.connect(context.destination);
+                            Visualizer.start(analyser);
+                        }
+                    });
+                };
+
+                const loadTrack = (path, name, bitrate) => {
+                    State.currentFile = path;
+                    State.bpm = 0;
+                    State.beats = [];
+
+                    document.getElementById('meta-title').innerText = name;
+                    document.getElementById('meta-bpm').innerText = '--';
+                    document.getElementById('meta-bitrate').innerText = bitrate || '--';
+                    document.getElementById('spinner').style.opacity = '1';
+
+                    Visualizer.clearGrid();
+                    wavesurfer.setVolume(0.5);
+
+                    wavesurfer.load(`/stream?file=${encodeURIComponent(path)}`);
+                };
+
+                const onReady = async () => {
+                    document.getElementById('spinner').style.opacity = '0';
+                    wavesurfer.play();
+                    const buffer = wavesurfer.getDecodedData();
+                    if (buffer) detectBPM(buffer);
+                };
+
+                const detectBPM = async (buffer) => {
+                    const bpmEl = document.getElementById('meta-bpm');
+                    bpmEl.innerText = "SCAN...";
+                    bpmEl.classList.add('blink');
+                    try {
+                        const { bpm, offset } = await guess(buffer);
+                        State.bpm = bpm;
+                        bpmEl.innerText = bpm.toFixed(1);
+                        bpmEl.classList.remove('blink');
+
+                        const duration = buffer.duration;
+                        const interval = 60 / bpm;
+                        State.beats = [];
+                        for (let t = offset; t < Math.min(duration, 1800); t += interval) {
+                            State.beats.push(t);
+                        }
+                    } catch (e) {
+                        console.warn("BPM Fail", e);
+                        bpmEl.innerText = "N/A";
+                        bpmEl.classList.remove('blink');
+                    }
+                };
+
+                const onTick = (time) => {
+                    const m = Math.floor(time / 60);
+                    const s = Math.floor(time % 60).toString().padStart(2, '0');
+                    document.getElementById('meta-time').innerText = `${m}:${s}`;
+                };
+
+                const updateUI = (playing) => {
+                    State.isPlaying = playing;
+                    const btn = document.getElementById('btn-play');
+                    btn.innerHTML = playing ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>';
+                    btn.classList.toggle('active', playing);
+                };
+
+                return {
+                    init,
+                    load: loadTrack,
+                    playPause: () => wavesurfer.playPause(),
+                    stop: () => { wavesurfer.stop(); wavesurfer.seekTo(0); },
+                    zoom: (val) => wavesurfer.zoom(val),
+                    getScroll: () => wavesurfer.renderer.scrollContainer,
+                    getDuration: () => wavesurfer.getDuration()
+                };
+            })();
+
+            const Visualizer = (() => {
+                let animationFrame, analyserNode;
+                const gridCanvas = document.getElementById('grid-layer');
+                const specCanvas = document.getElementById('spectrum-layer');
+                const gridCtx = gridCanvas.getContext('2d');
+                const specCtx = specCanvas.getContext('2d');
+
+                const start = (analyser) => {
+                    analyserNode = analyser;
+                    loop();
+                };
+
+                const loop = () => {
+                    drawSpectrum();
+                    drawGrid();
+                    animationFrame = requestAnimationFrame(loop);
+                };
+
+                const drawSpectrum = () => {
+                    if (!analyserNode) return;
+                    if (specCanvas.width !== specCanvas.offsetWidth) {
+                        specCanvas.width = specCanvas.offsetWidth;
+                        specCanvas.height = specCanvas.offsetHeight;
+                    }
+                    const len = analyserNode.frequencyBinCount;
+                    const data = new Uint8Array(len);
+                    analyserNode.getByteFrequencyData(data);
+                    specCtx.clearRect(0, 0, specCanvas.width, specCanvas.height);
+
+                    const barW = (specCanvas.width / len) * 2.5;
+                    let x = 0;
+                    for (let i = 0; i < len; i++) {
+                        const barH = (data[i] / 255) * specCanvas.height;
+                        specCtx.fillStyle = `rgba(0, 240, 255, ${data[i] / 500})`;
+                        specCtx.fillRect(x, specCanvas.height - barH, barW, barH);
+                        x += barW + 1;
+                    }
+                };
+
+                const drawGrid = () => {
+                    if (State.beats.length === 0) return;
+                    const hold = AudioEngine.getScroll();
+                    if (!hold) return;
+
+                    const dpr = window.devicePixelRatio || 1;
+                    const rect = gridCanvas.getBoundingClientRect();
+                    if (gridCanvas.width !== Math.floor(rect.width * dpr)) {
+                        gridCanvas.width = rect.width * dpr;
+                        gridCanvas.height = rect.height * dpr;
+                    }
+
+                    gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+                    gridCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+                    const dur = AudioEngine.getDuration();
+                    if (!dur) return;
+
+                    const totalW = hold.scrollWidth;
+                    const scrollL = hold.scrollLeft;
+                    const pxPerSec = totalW / dur;
+                    const viewStart = scrollL / pxPerSec;
+                    const viewEnd = (scrollL + rect.width) / pxPerSec;
+
+                    gridCtx.lineWidth = 1;
+                    const beats = State.beats.filter(t => t >= viewStart && t <= viewEnd);
+
+                    beats.forEach((t) => {
+                        const idx = State.beats.indexOf(t);
+                        const isDown = idx % 4 === 0;
+                        const x = (t * pxPerSec) - scrollL;
+
+                        if (isDown) {
+                            gridCtx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                            gridCtx.beginPath(); gridCtx.moveTo(x, 0); gridCtx.lineTo(x, rect.height); gridCtx.stroke();
+                            gridCtx.fillStyle = '#00f0ff'; gridCtx.fillRect(x - 2, 0, 4, 4);
+                        } else {
+                            gridCtx.strokeStyle = 'rgba(0, 240, 255, 0.3)';
+                            gridCtx.beginPath(); gridCtx.moveTo(x, 15); gridCtx.lineTo(x, rect.height - 15); gridCtx.stroke();
+                        }
+                    });
+                };
+                return { start, clearGrid: () => gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height) };
+            })();
+
+            let popupsEnabled = false;
+            const checkPopups = () => {
+                const w = window.open('about:blank', '_blank', 'width=1,height=1');
+                if (w) { w.close(); popupsEnabled = true; return true; }
+                alert('SYSTEM NOTICE: Popups blocked. Enable them to allow batch downloading (>30 files).');
+                return false;
+            };
+
+            const UIManager = (() => {
+                const els = {
+                    tree: document.getElementById('file-root'),
+                    play: document.getElementById('btn-play'),
+                    stop: document.getElementById('btn-stop'),
+                    zoom: document.getElementById('zoom-slider'),
+                    extract: document.getElementById('btn-extract'),
+                    count: document.getElementById('select-count'),
+                    warn: document.getElementById('select-warn')
+                };
+
+                const init = () => {
+                    els.play.addEventListener('click', () => AudioEngine.playPause());
+                    els.stop.addEventListener('click', () => AudioEngine.stop());
+                    els.zoom.addEventListener('input', (e) => AudioEngine.zoom(e.target.value));
+
+                    els.tree.addEventListener('click', handleTreeClick);
+                    els.extract.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        if (State.selectedFiles.size >= 30 && !popupsEnabled) {
+                            if (!checkPopups()) return;
+                        }
+                        performDownload();
+                    });
+                };
+
+                const handleTreeClick = (e) => {
+                    const dirRow = e.target.closest('.type-dir');
+                    if (dirRow && !e.target.classList.contains('node-check')) {
+                        const icon = dirRow.querySelector('.fa-caret-right');
+                        const sub = dirRow.nextElementSibling;
+                        const isOpen = sub.classList.contains('open');
+
+                        sub.classList.toggle('open');
+                        icon.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
+                        return;
+                    }
+
+                    const fileRow = e.target.closest('.type-file');
+                    if (fileRow && !e.target.classList.contains('node-check')) {
+                        document.querySelectorAll('.node-content.is-active').forEach(el => el.classList.remove('is-active'));
+                        fileRow.classList.add('is-active');
+
+                        AudioEngine.load(
+                            fileRow.dataset.path,
+                            fileRow.dataset.name,
+                            fileRow.dataset.bitrate
+                        );
+                        return;
+                    }
+
+                    if (e.target.classList.contains('node-check')) {
+                        e.stopPropagation();
+                        const checked = e.target.checked;
+
+                        if (e.target.classList.contains('group-check')) {
+                            const parentLi = e.target.closest('li');
+                            const subChecks = parentLi.querySelectorAll('.sub-tree .file-check');
+                            subChecks.forEach(c => {
+                                c.checked = checked;
+                                if (checked) State.selectedFiles.add(c.value);
+                                else State.selectedFiles.delete(c.value);
+                            });
+                        } else {
+                            if (checked) State.selectedFiles.add(e.target.value);
+                            else State.selectedFiles.delete(e.target.value);
+                        }
+                        updateStats();
+                    }
+                };
+
+                const updateStats = () => {
+                    const count = State.selectedFiles.size;
+                    els.count.innerText = count;
+                    els.warn.innerText = count >= 30 ? ' | BULK MODE (POPUPS REQUIRED)' : '';
+                    els.extract.disabled = count === 0;
+                };
+
+                const performDownload = async () => {
+                    const btn = els.extract;
+                    const originalText = btn.innerHTML;
+                    const CHUNK_SIZE = 30;
+                    const files = Array.from(State.selectedFiles);
+                    const chunks = [];
+
+                    for (let i = 0; i < files.length; i += CHUNK_SIZE) {
+                        chunks.push(files.slice(i, i + CHUNK_SIZE));
+                    }
+
+                    btn.disabled = true;
+                    btn.innerHTML = `QUEUED ${chunks.length} BATCHES...`;
+
+                    try {
+                        for (let i = 0; i < chunks.length; i++) {
+                            btn.innerHTML = `PROCESSING BATCH ${i + 1}/${chunks.length} <i class="fas fa-cog fa-spin"></i>`;
+
+                            const res = await fetch('/api/job', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ files: chunks[i] })
+                            });
+                            if (!res.ok) throw new Error('Job Start Failed');
+
+                            const { jobId } = await res.json();
+
+                            // Poll
+                            await new Promise((resolve, reject) => {
+                                const poll = setInterval(async () => {
+                                    try {
+                                        const jobRes = await fetch(`/api/job/${jobId}`);
+                                        const job = await jobRes.json();
+                                        if (job.status === 'ready') { clearInterval(poll); resolve(); }
+                                        else if (job.status === 'error') { clearInterval(poll); reject(); }
+                                    } catch (e) { clearInterval(poll); reject(e); }
+                                }, 1000);
+                            });
+
+                            const dlUrl = `/download/${jobId}`;
+                            if (chunks.length === 1) window.location.href = dlUrl;
+                            else window.open(dlUrl, '_blank');
+
+                            if (chunks.length > 1) await new Promise(r => setTimeout(r, 1000));
+                        }
+
+                        btn.innerHTML = 'COMPLETE';
+                        btn.style.borderColor = '#00ff00';
+                    } catch (e) {
+                        console.error(e);
+                        btn.innerHTML = 'ERROR';
+                        btn.style.borderColor = 'red';
+                    } finally {
+                        setTimeout(() => {
+                            btn.disabled = false;
+                            btn.style.borderColor = '';
+                            btn.innerHTML = originalText;
+                        }, 3000);
+                    }
+                };
+
+                return { init };
+            })();
+
+            document.addEventListener('DOMContentLoaded', () => {
+                AudioEngine.init();
+                UIManager.init();
+            });
+        </script>
+</body>
+
+</html>

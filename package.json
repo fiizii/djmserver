@@ -1,0 +1,23 @@
+{
+  "name": "djmserver",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "fiizii",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.4.6",
+    "chokidar": "^5.0.0",
+    "express": "^5.1.0",
+    "js-yaml": "^4.1.1",
+    "mime-types": "^3.0.2",
+    "music-metadata": "^11.10.3",
+    "unzipper": "^0.12.3",
+    "yazl": "^3.3.1"
+  }
+}
