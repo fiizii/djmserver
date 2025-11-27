@@ -17,7 +17,8 @@ devtunnel host -p 3000 --allow-anonymous
 ### 3. Sync
 1. Go to `http://localhost:3000/admin`.
 2. Login with your `key`.
-3. Add Remote: Enter a Name and the DevTunnel URL.
+3. Add Remote: Enter a Name and the DevTunnel URL (of the other source, if you sync your own it wont work.)
 4. Click **SYNC**.
+5. Enjoy ungatekept music, files will be deduped.
 
 *Syncing happens in the background. Check your terminal for progress bars and logs.*
