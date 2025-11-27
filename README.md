@@ -1,6 +1,6 @@
 ### Setup
 0. Extract this project into your music directory , whatever contains your track folders / list. It will broadcast any audio file from the directory it's extracted in.
-1. Run `install.bat`.
+1. Run `quick.bat`.
 2. Run `node index.js`. (First run generates config and exits).
 3. Edit `.mrepo/conf.yaml`: set `ready: true` and copy the `key`.
 4. Run `node index.js`.
