@@ -9,7 +9,7 @@ if not exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%PATH%;%ProgramFiles%\no
 
 if exist package.json (
     echo. & echo [NPM] Installing dependencies...
-    call npm install --no-audit --no-fund --loglevel=error --progress=true
+    call npm install
     echo [OK] Setup complete.
 ) else (
     echo [!] package.json missing.
