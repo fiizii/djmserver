@@ -465,358 +465,268 @@
         <script type="module">
             import { guess } from 'web-audio-beat-detector';
 
-            const State = {
+            const S = {
                 bpm: 0,
                 beats: [],
-                isPlaying: false,
-                currentFile: null,
-                selectedFiles: new Set()
+                playing: false,
+                files: new Set(),
+                ctx: null,
+                analyser: null,
+                ws: null,
+                raf: null
             };
 
-            const AudioEngine = (() => {
-                let wavesurfer, context, analyser;
+            const el = (id) => document.getElementById(id);
+            const ui = {
+                grid: el('grid-layer'),
+                spec: el('spectrum-layer'),
+                tree: el('file-root'),
+                title: el('meta-title'),
+                bpm: el('meta-bpm'),
+                bitrate: el('meta-bitrate'),
+                time: el('meta-time'),
+                dl: el('btn-extract'),
+                count: el('select-count'),
+                spin: el('spinner')
+            };
 
-                const init = () => {
-                    wavesurfer = WaveSurfer.create({
-                        container: '#waveform',
-                        waveColor: '#1c252e',
-                        progressColor: '#00f0ff',
-                        cursorColor: '#fff',
-                        barWidth: 2,
-                        barGap: 2,
-                        barRadius: 2,
-                        height: 'auto',
-                        normalize: true,
-                        interact: true,
-                    });
+            const ctx = {
+                grid: ui.grid.getContext('2d'),
+                spec: ui.spec.getContext('2d')
+            };
 
-                    wavesurfer.on('ready', onReady);
-                    wavesurfer.on('play', () => updateUI(true));
-                    wavesurfer.on('pause', () => updateUI(false));
-                    wavesurfer.on('finish', () => updateUI(false));
-                    wavesurfer.on('audioprocess', onTick);
+            const resize = () => {
+                const dpr = window.devicePixelRatio || 1;
+                const r = ui.grid.parentElement.getBoundingClientRect();
+                [ui.grid, ui.spec].forEach(c => {
+                    c.width = r.width * dpr;
+                    c.height = r.height * dpr;
+                    c.style.width = `${r.width}px`;
+                    c.style.height = `${r.height}px`;
+                });
+                ctx.grid.setTransform(dpr, 0, 0, dpr, 0, 0);
+                ctx.spec.setTransform(dpr, 0, 0, dpr, 0, 0);
+            };
 
-                    wavesurfer.on('ready', () => {
-                        if (!context) {
-                            context = new (window.AudioContext || window.webkitAudioContext)();
-                            const media = wavesurfer.getMediaElement();
-                            const source = context.createMediaElementSource(media);
-                            analyser = context.createAnalyser();
-                            analyser.fftSize = 512;
-                            source.connect(analyser);
-                            analyser.connect(context.destination);
-                            Visualizer.start(analyser);
-                        }
-                    });
-                };
+            new ResizeObserver(resize).observe(ui.grid.parentElement);
 
-                const loadTrack = (path, name, bitrate) => {
-                    State.currentFile = path;
-                    State.bpm = 0;
-                    State.beats = [];
+            const clear = (c) => {
+                c.save();
+                c.setTransform(1, 0, 0, 1, 0, 0);
+                c.clearRect(0, 0, c.canvas.width, c.canvas.height);
+                c.restore();
+            };
 
-                    document.getElementById('meta-title').innerText = name;
-                    document.getElementById('meta-bpm').innerText = '--';
-                    document.getElementById('meta-bitrate').innerText = bitrate || '--';
-                    document.getElementById('spinner').style.opacity = '1';
+            const draw = () => {
+                if (!S.playing) return;
 
-                    Visualizer.clearGrid();
-                    wavesurfer.setVolume(0.5);
-
-                    wavesurfer.load(`/stream?file=${encodeURIComponent(path)}`);
-                };
-
-                const onReady = async () => {
-                    document.getElementById('spinner').style.opacity = '0';
-                    wavesurfer.play();
-                    const buffer = wavesurfer.getDecodedData();
-                    if (buffer) detectBPM(buffer);
-                };
-
-                const detectBPM = async (buffer) => {
-                    const bpmEl = document.getElementById('meta-bpm');
-                    bpmEl.innerText = "SCAN...";
-                    bpmEl.classList.add('blink');
-                    try {
-                        const { bpm, offset } = await guess(buffer);
-                        State.bpm = bpm;
-                        bpmEl.innerText = bpm.toFixed(1);
-                        bpmEl.classList.remove('blink');
-
-                        const duration = buffer.duration;
-                        const interval = 60 / bpm;
-                        State.beats = [];
-                        for (let t = offset; t < Math.min(duration, 1800); t += interval) {
-                            State.beats.push(t);
-                        }
-                    } catch (e) {
-                        console.warn("BPM Fail", e);
-                        bpmEl.innerText = "N/A";
-                        bpmEl.classList.remove('blink');
-                    }
-                };
-
-                const onTick = (time) => {
-                    const m = Math.floor(time / 60);
-                    const s = Math.floor(time % 60).toString().padStart(2, '0');
-                    document.getElementById('meta-time').innerText = `${m}:${s}`;
-                };
-
-                const updateUI = (playing) => {
-                    State.isPlaying = playing;
-                    const btn = document.getElementById('btn-play');
-                    btn.innerHTML = playing ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>';
-                    btn.classList.toggle('active', playing);
-                };
-
-                return {
-                    init,
-                    load: loadTrack,
-                    playPause: () => wavesurfer.playPause(),
-                    stop: () => { wavesurfer.stop(); wavesurfer.seekTo(0); },
-                    zoom: (val) => wavesurfer.zoom(val),
-                    getScroll: () => wavesurfer.renderer.scrollContainer,
-                    getDuration: () => wavesurfer.getDuration()
-                };
-            })();
-
-            const Visualizer = (() => {
-                let animationFrame, analyserNode;
-                const gridCanvas = document.getElementById('grid-layer');
-                const specCanvas = document.getElementById('spectrum-layer');
-                const gridCtx = gridCanvas.getContext('2d');
-                const specCtx = specCanvas.getContext('2d');
-
-                const start = (analyser) => {
-                    analyserNode = analyser;
-                    loop();
-                };
-
-                const loop = () => {
-                    drawSpectrum();
-                    drawGrid();
-                    animationFrame = requestAnimationFrame(loop);
-                };
-
-                const drawSpectrum = () => {
-                    if (!analyserNode) return;
-                    if (specCanvas.width !== specCanvas.offsetWidth) {
-                        specCanvas.width = specCanvas.offsetWidth;
-                        specCanvas.height = specCanvas.offsetHeight;
-                    }
-                    const len = analyserNode.frequencyBinCount;
+                // Spectrum
+                clear(ctx.spec);
+                if (S.analyser) {
+                    const len = S.analyser.frequencyBinCount;
                     const data = new Uint8Array(len);
-                    analyserNode.getByteFrequencyData(data);
-                    specCtx.clearRect(0, 0, specCanvas.width, specCanvas.height);
-
-                    const barW = (specCanvas.width / len) * 2.5;
+                    S.analyser.getByteFrequencyData(data);
+                    const w = ui.spec.width / window.devicePixelRatio;
+                    const h = ui.spec.height / window.devicePixelRatio;
+                    const barW = (w / len) * 2.5;
                     let x = 0;
                     for (let i = 0; i < len; i++) {
-                        const barH = (data[i] / 255) * specCanvas.height;
-                        specCtx.fillStyle = `rgba(0, 240, 255, ${data[i] / 500})`;
-                        specCtx.fillRect(x, specCanvas.height - barH, barW, barH);
+                        const barH = (data[i] / 255) * h;
+                        ctx.spec.fillStyle = `rgba(0, 240, 255, ${data[i] / 500})`;
+                        ctx.spec.fillRect(x, h - barH, barW, barH);
                         x += barW + 1;
                     }
-                };
+                }
 
-                const drawGrid = () => {
-                    if (State.beats.length === 0) return;
-                    const hold = AudioEngine.getScroll();
-                    if (!hold) return;
+                // Grid
+                clear(ctx.grid);
+                if (S.beats.length && S.ws) {
+                    const scroll = S.ws.renderer.scrollContainer;
+                    const dur = S.ws.getDuration();
+                    const w = ui.grid.width / window.devicePixelRatio;
+                    const pxSec = scroll.scrollWidth / dur;
+                    const start = scroll.scrollLeft / pxSec;
+                    const end = (scroll.scrollLeft + w) / pxSec;
 
-                    const dpr = window.devicePixelRatio || 1;
-                    const rect = gridCanvas.getBoundingClientRect();
-                    if (gridCanvas.width !== Math.floor(rect.width * dpr)) {
-                        gridCanvas.width = rect.width * dpr;
-                        gridCanvas.height = rect.height * dpr;
-                    }
+                    const visible = S.beats.filter(t => t >= start - 0.5 && t <= end + 0.5);
+                    const h = ui.grid.height / window.devicePixelRatio;
 
-                    gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
-                    gridCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-                    const dur = AudioEngine.getDuration();
-                    if (!dur) return;
-
-                    const totalW = hold.scrollWidth;
-                    const scrollL = hold.scrollLeft;
-                    const pxPerSec = totalW / dur;
-                    const viewStart = scrollL / pxPerSec;
-                    const viewEnd = (scrollL + rect.width) / pxPerSec;
-
-                    gridCtx.lineWidth = 1;
-                    const beats = State.beats.filter(t => t >= viewStart && t <= viewEnd);
-
-                    beats.forEach((t) => {
-                        const idx = State.beats.indexOf(t);
-                        const isDown = idx % 4 === 0;
-                        const x = (t * pxPerSec) - scrollL;
-
+                    ctx.grid.lineWidth = 1;
+                    visible.forEach(t => {
+                        const isDown = S.beats.indexOf(t) % 4 === 0;
+                        const x = (t * pxSec) - scroll.scrollLeft;
+                        ctx.grid.beginPath();
+                        ctx.grid.moveTo(x, isDown ? 0 : 15);
+                        ctx.grid.lineTo(x, h - (isDown ? 0 : 15));
                         if (isDown) {
-                            gridCtx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                            gridCtx.beginPath(); gridCtx.moveTo(x, 0); gridCtx.lineTo(x, rect.height); gridCtx.stroke();
-                            gridCtx.fillStyle = '#00f0ff'; gridCtx.fillRect(x - 2, 0, 4, 4);
+                            ctx.grid.strokeStyle = 'rgba(255,255,255,0.8)';
+                            ctx.grid.stroke();
+                            ctx.grid.fillStyle = '#00f0ff';
+                            ctx.grid.fillRect(x - 2, 0, 4, 4);
                         } else {
-                            gridCtx.strokeStyle = 'rgba(0, 240, 255, 0.3)';
-                            gridCtx.beginPath(); gridCtx.moveTo(x, 15); gridCtx.lineTo(x, rect.height - 15); gridCtx.stroke();
+                            ctx.grid.strokeStyle = 'rgba(0,240,255,0.3)';
+                            ctx.grid.stroke();
                         }
                     });
-                };
-                return { start, clearGrid: () => gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height) };
-            })();
-
-            let popupsEnabled = false;
-            const checkPopups = () => {
-                const w = window.open('about:blank', '_blank', 'width=1,height=1');
-                if (w) { w.close(); popupsEnabled = true; return true; }
-                alert('SYSTEM NOTICE: Popups blocked. Enable them to allow batch downloading (>30 files).');
-                return false;
+                }
+                S.raf = requestAnimationFrame(draw);
             };
 
-            const UIManager = (() => {
-                const els = {
-                    tree: document.getElementById('file-root'),
-                    play: document.getElementById('btn-play'),
-                    stop: document.getElementById('btn-stop'),
-                    zoom: document.getElementById('zoom-slider'),
-                    extract: document.getElementById('btn-extract'),
-                    count: document.getElementById('select-count'),
-                    warn: document.getElementById('select-warn')
-                };
+            const scan = async (buf) => {
+                ui.bpm.innerText = "SCAN...";
+                ui.bpm.classList.add('blink');
+                try {
+                    const { bpm, offset } = await guess(buf);
+                    S.bpm = bpm;
+                    ui.bpm.innerText = bpm.toFixed(1);
+                    S.beats = [];
+                    const interval = 60 / bpm;
+                    for (let t = offset; t < Math.min(buf.duration, 1800); t += interval) S.beats.push(t);
+                    if (!S.playing && S.ws) { clear(ctx.grid); draw(); cancelAnimationFrame(S.raf); } //  1 frame
+                } catch {
+                    ui.bpm.innerText = "N/A";
+                } finally {
+                    ui.bpm.classList.remove('blink');
+                }
+            };
 
-                const init = () => {
-                    els.play.addEventListener('click', () => AudioEngine.playPause());
-                    els.stop.addEventListener('click', () => AudioEngine.stop());
-                    els.zoom.addEventListener('input', (e) => AudioEngine.zoom(e.target.value));
+            const initAudio = () => {
+                S.ws = WaveSurfer.create({
+                    container: '#waveform',
+                    waveColor: '#1c252e',
+                    progressColor: '#00f0ff',
+                    cursorColor: '#fff',
+                    barWidth: 2, barGap: 2, barRadius: 2, height: 'auto', normalize: true, interact: true,
+                    backend: 'MediaElement'
+                });
 
-                    els.tree.addEventListener('click', handleTreeClick);
-                    els.extract.addEventListener('click', async (e) => {
-                        e.preventDefault();
-                        if (State.selectedFiles.size >= 30 && !popupsEnabled) {
-                            if (!checkPopups()) return;
-                        }
-                        performDownload();
+                S.ws.on('ready', () => {
+                    ui.spin.style.opacity = '0';
+                    S.ws.play();
+                    S.ws.zoom(100);
+
+                    if (!S.ctx) {
+                        S.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                        const src = S.ctx.createMediaElementSource(S.ws.getMediaElement());
+                        S.analyser = S.ctx.createAnalyser();
+                        S.analyser.fftSize = 512;
+                        src.connect(S.analyser);
+                        S.analyser.connect(S.ctx.destination);
+                    }
+                    const buf = S.ws.getDecodedData();
+                    if (buf) scan(buf);
+                });
+
+                S.ws.on('play', () => {
+                    S.playing = true;
+                    el('btn-play').innerHTML = '<i class="fas fa-pause"></i>';
+                    draw();
+                });
+
+                S.ws.on('pause', () => {
+                    S.playing = false;
+                    el('btn-play').innerHTML = '<i class="fas fa-play"></i>';
+                    cancelAnimationFrame(S.raf);
+                });
+
+                S.ws.on('audioprocess', t => {
+                    const m = Math.floor(t / 60), s = Math.floor(t % 60).toString().padStart(2, '0');
+                    ui.time.innerText = `${m}:${s}`;
+                });
+
+                //  manual scroll update
+                S.ws.on('scroll', () => { if (!S.playing) { S.playing = true; draw(); S.playing = false; } });
+            };
+
+            const treeClick = (e) => {
+                const t = e.target;
+                if (t.classList.contains('node-check')) {
+                    e.stopPropagation();
+                    const add = t.checked;
+                    const nodes = t.classList.contains('group-check')
+                        ? t.closest('li').querySelectorAll('.sub-tree .file-check')
+                        : [t];
+
+                    nodes.forEach(n => {
+                        n.checked = add;
+                        add ? S.files.add(n.value) : S.files.delete(n.value);
                     });
-                };
 
-                const handleTreeClick = (e) => {
-                    const dirRow = e.target.closest('.type-dir');
-                    if (dirRow && !e.target.classList.contains('node-check')) {
-                        const icon = dirRow.querySelector('.fa-caret-right');
-                        const sub = dirRow.nextElementSibling;
-                        const isOpen = sub.classList.contains('open');
+                    ui.count.innerText = S.files.size;
+                    ui.dl.disabled = S.files.size === 0;
+                    el('select-warn').innerText = S.files.size >= 30 ? ' | BULK MODE' : '';
+                    return;
+                }
 
-                        sub.classList.toggle('open');
-                        icon.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
-                        return;
+                const dir = t.closest('.type-dir');
+                if (dir) {
+                    const sub = dir.nextElementSibling;
+                    sub.classList.toggle('open');
+                    dir.querySelector('.fa-caret-right').style.transform = sub.classList.contains('open') ? 'rotate(90deg)' : 'rotate(0deg)';
+                }
+
+                const file = t.closest('.type-file');
+                if (file) {
+                    document.querySelectorAll('.is-active').forEach(x => x.classList.remove('is-active'));
+                    file.classList.add('is-active');
+                    const { path, name, bitrate } = file.dataset;
+                    ui.title.innerText = name;
+                    ui.bitrate.innerText = bitrate || '--';
+                    ui.bpm.innerText = '--';
+                    ui.spin.style.opacity = '1';
+                    clear(ctx.grid);
+                    S.ws.load(`/stream?file=${encodeURIComponent(path)}`);
+                }
+            };
+
+            const download = async () => {
+                if (S.files.size >= 30) {
+                    const w = window.open('about:blank', '_blank', 'width=1,height=1');
+                    if (!w) return alert('Enable popups for bulk DL');
+                    w.close();
+                }
+
+                ui.dl.disabled = true;
+                const txt = ui.dl.innerHTML;
+                const files = [...S.files];
+                const chunks = [];
+
+                while (files.length) chunks.push(files.splice(0, 30));
+
+                try {
+                    for (let i = 0; i < chunks.length; i++) {
+                        ui.dl.innerHTML = `BATCH ${i + 1}/${chunks.length} <i class="fas fa-cog fa-spin"></i>`;
+                        const { jobId } = await fetch('/api/job', {
+                            method: 'POST', body: JSON.stringify({ files: chunks[i] }), headers: { 'Content-Type': 'application/json' }
+                        }).then(r => r.json());
+
+                        await new Promise((res, rej) => {
+                            const iv = setInterval(async () => {
+                                const s = (await fetch(`/api/job/${jobId}`).then(r => r.json())).status;
+                                if (s === 'ready') { clearInterval(iv); res(); }
+                                if (s === 'error') { clearInterval(iv); rej(); }
+                            }, 1000);
+                        });
+
+                        const url = `/download/${jobId}`;
+                        chunks.length === 1 ? window.location.href = url : window.open(url, '_blank');
+                        if (chunks.length > 1) await new Promise(r => setTimeout(r, 1000));
                     }
-
-                    const fileRow = e.target.closest('.type-file');
-                    if (fileRow && !e.target.classList.contains('node-check')) {
-                        document.querySelectorAll('.node-content.is-active').forEach(el => el.classList.remove('is-active'));
-                        fileRow.classList.add('is-active');
-
-                        AudioEngine.load(
-                            fileRow.dataset.path,
-                            fileRow.dataset.name,
-                            fileRow.dataset.bitrate
-                        );
-                        return;
-                    }
-
-                    if (e.target.classList.contains('node-check')) {
-                        e.stopPropagation();
-                        const checked = e.target.checked;
-
-                        if (e.target.classList.contains('group-check')) {
-                            const parentLi = e.target.closest('li');
-                            const subChecks = parentLi.querySelectorAll('.sub-tree .file-check');
-                            subChecks.forEach(c => {
-                                c.checked = checked;
-                                if (checked) State.selectedFiles.add(c.value);
-                                else State.selectedFiles.delete(c.value);
-                            });
-                        } else {
-                            if (checked) State.selectedFiles.add(e.target.value);
-                            else State.selectedFiles.delete(e.target.value);
-                        }
-                        updateStats();
-                    }
-                };
-
-                const updateStats = () => {
-                    const count = State.selectedFiles.size;
-                    els.count.innerText = count;
-                    els.warn.innerText = count >= 30 ? ' | BULK MODE (POPUPS REQUIRED)' : '';
-                    els.extract.disabled = count === 0;
-                };
-
-                const performDownload = async () => {
-                    const btn = els.extract;
-                    const originalText = btn.innerHTML;
-                    const CHUNK_SIZE = 30;
-                    const files = Array.from(State.selectedFiles);
-                    const chunks = [];
-
-                    for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-                        chunks.push(files.slice(i, i + CHUNK_SIZE));
-                    }
-
-                    btn.disabled = true;
-                    btn.innerHTML = `QUEUED ${chunks.length} BATCHES...`;
-
-                    try {
-                        for (let i = 0; i < chunks.length; i++) {
-                            btn.innerHTML = `PROCESSING BATCH ${i + 1}/${chunks.length} <i class="fas fa-cog fa-spin"></i>`;
-
-                            const res = await fetch('/api/job', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ files: chunks[i] })
-                            });
-                            if (!res.ok) throw new Error('Job Start Failed');
-
-                            const { jobId } = await res.json();
-
-                            // Poll
-                            await new Promise((resolve, reject) => {
-                                const poll = setInterval(async () => {
-                                    try {
-                                        const jobRes = await fetch(`/api/job/${jobId}`);
-                                        const job = await jobRes.json();
-                                        if (job.status === 'ready') { clearInterval(poll); resolve(); }
-                                        else if (job.status === 'error') { clearInterval(poll); reject(); }
-                                    } catch (e) { clearInterval(poll); reject(e); }
-                                }, 1000);
-                            });
-
-                            const dlUrl = `/download/${jobId}`;
-                            if (chunks.length === 1) window.location.href = dlUrl;
-                            else window.open(dlUrl, '_blank');
-
-                            if (chunks.length > 1) await new Promise(r => setTimeout(r, 1000));
-                        }
-
-                        btn.innerHTML = 'COMPLETE';
-                        btn.style.borderColor = '#00ff00';
-                    } catch (e) {
-                        console.error(e);
-                        btn.innerHTML = 'ERROR';
-                        btn.style.borderColor = 'red';
-                    } finally {
-                        setTimeout(() => {
-                            btn.disabled = false;
-                            btn.style.borderColor = '';
-                            btn.innerHTML = originalText;
-                        }, 3000);
-                    }
-                };
-
-                return { init };
-            })();
+                    ui.dl.innerHTML = 'DONE';
+                } catch (e) {
+                    ui.dl.innerHTML = 'ERR';
+                    console.error(e);
+                }
+                setTimeout(() => { ui.dl.disabled = false; ui.dl.innerHTML = txt; }, 2000);
+            };
 
             document.addEventListener('DOMContentLoaded', () => {
-                AudioEngine.init();
-                UIManager.init();
+                initAudio();
+                ui.tree.addEventListener('click', treeClick);
+                ui.dl.addEventListener('click', download);
+                el('btn-play').onclick = () => S.ws.playPause();
+                el('btn-stop').onclick = () => { S.ws.stop(); S.ws.seekTo(0); };
+                el('zoom-slider').oninput = (e) => S.ws.zoom(e.target.value);
             });
         </script>
 </body>
